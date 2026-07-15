@@ -1,0 +1,30 @@
+# ESP-IDF build output
+build/
+
+# ESP-IDF managed components (fetched by idf.py)
+managed_components/
+
+# Generated sdkconfig
+sdkconfig
+sdkconfig.old
+
+# Cache
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Serial lock files
+/var/spool/uucp/
