@@ -38,7 +38,7 @@ static const char *TAG = "main";
 
 #define LCD_H_RES               480
 #define LCD_V_RES               480
-#define LVGL_BUFFER_LINES       20
+#define LVGL_BUFFER_LINES       40
 
 i2c_master_bus_handle_t i2c_bus_handle;
 static i2c_master_dev_handle_t axp_dev_handle;
@@ -210,6 +210,24 @@ static void init_touch(void)
     ESP_LOGI(TAG, "CST9220 touch controller ready");
 }
 
+static void invalidate_area_event_cb(lv_event_t *e)
+{
+    lv_area_t *area = lv_event_get_invalidated_area(e);
+    if (!area) return;
+
+    // Force invalid area width to be even so that the total byte count
+    // (width * height * 2 bytes) is always a multiple of 4 bytes.
+    // This resolves QSPI DMA alignment requirements and prevents diagonal slanted screen distortion.
+    int32_t width = area->x2 - area->x1 + 1;
+    if (width % 2 != 0) {
+        if (area->x2 < LCD_H_RES - 1) {
+            area->x2++;
+        } else if (area->x1 > 0) {
+            area->x1--;
+        }
+    }
+}
+
 static void lvgl_init(void)
 {
     ESP_LOGI(TAG, "Initializing LVGL...");
@@ -217,6 +235,9 @@ static void lvgl_init(void)
 
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
+
+    // Register the invalidate area callback to enforce word-aligned DMA transactions
+    lv_display_add_event_cb(disp, invalidate_area_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
     size_t buf_sz = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
     lv_color_t *buf1 = heap_caps_malloc(buf_sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
