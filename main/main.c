@@ -53,6 +53,20 @@ typedef struct {
 
 static lcd_flush_ctx_t flush_ctx;
 
+static const co5300_lcd_init_cmd_t custom_lcd_init_cmds[] = {
+    {0xFE, (uint8_t []){0x00}, 0, 0},
+    {0xC4, (uint8_t []){0x80}, 1, 0},
+    {0x35, (uint8_t []){0x00}, 0, 10},
+    {0x36, (uint8_t []){0xA0}, 1, 0}, // Hardware rotation: MV=1, MY=1 (Swap XY, Mirror Y)
+    {0x53, (uint8_t []){0x20}, 1, 10},
+    {0x51, (uint8_t []){0xFF}, 1, 10},
+    {0x63, (uint8_t []){0xFF}, 1, 10},
+    {0x2A, (uint8_t []){0x00, 0x06, 0x01, 0xDD}, 4, 0},
+    {0x2B, (uint8_t []){0x00, 0x00, 0x01, 0xD1}, 4, 0},
+    {0x11, (uint8_t []){0x00}, 0, 60},
+    {0x29, (uint8_t []){0x00}, 0, 0},
+};
+
 static esp_err_t axp_write_reg(uint8_t reg, uint8_t val)
 {
     uint8_t data[2] = {reg, val};
@@ -266,15 +280,18 @@ void app_main(void)
     ESP_LOGI(TAG, "Installing LCD panel IO...");
     refresh_finish_sem = xSemaphoreCreateBinary();
     esp_lcd_panel_io_handle_t io_handle = NULL;
-    const esp_lcd_panel_io_spi_config_t io_config = CO5300_PANEL_IO_QSPI_CONFIG(
+    esp_lcd_panel_io_spi_config_t io_config = CO5300_PANEL_IO_QSPI_CONFIG(
         LCD_CS_PIN,
         notify_refresh_ready,
         NULL
     );
+    io_config.pclk_hz = 20 * 1000 * 1000; // Lower QSPI clock from 40MHz to 20MHz to prevent signal reflections and slanted/italicized display distortion
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
 
     ESP_LOGI(TAG, "Installing CO5300 display driver...");
     const co5300_vendor_config_t vendor_config = {
+        .init_cmds = custom_lcd_init_cmds,
+        .init_cmds_size = sizeof(custom_lcd_init_cmds) / sizeof(co5300_lcd_init_cmd_t),
         .flags = {
             .use_qspi_interface = 1,
         },
