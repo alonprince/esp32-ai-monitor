@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "ui.h"
 #include "ble_server.h"
 #include "audio.h"
@@ -593,6 +594,10 @@ void ui_update_telemetry(const ble_telemetry_data_t *data)
     char progress_buf[16];
     snprintf(progress_buf, sizeof(progress_buf), "%d", progress);
     lv_label_set_text(footer_progress_lbl, progress_buf);
+    
+    // Force immediate size update of the number label so that the subsequent align call
+    // uses the newly rendered text size (prevents overlapping/colliding characters).
+    lv_obj_update_layout(footer_progress_lbl);
     
     // Dynamic re-align to keep '%' symbol snapped to the right edge of the shifting numbers
     lv_obj_align_to(footer_progress_pct_lbl, footer_progress_lbl, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -6);
