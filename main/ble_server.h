@@ -18,7 +18,7 @@ typedef struct {
     ble_monitor_state_t state;
     char agent_name[32];
     char workspace[64];
-    char active_tool[128];
+    char active_tool[256];
     char message_preview[256];
     uint8_t progress_current;
     uint8_t progress_total;

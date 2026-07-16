@@ -1,5 +1,6 @@
 #include "ble_server.h"
 #include <string.h>
+#include <sys/time.h>
 #include "esp_log.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -127,7 +128,13 @@ static void ble_server_parse_tlv(const uint8_t *data, uint16_t len)
                                             ((uint32_t)val[2] << 8) | 
                                             val[3];
                     s_telemetry.updated = true;
-                    ESP_LOGI(TAG, "TLV Time Sync: %lu", s_telemetry.sync_time);
+                    ESP_LOGI(TAG, "TLV Time Sync: %lu", (unsigned long)s_telemetry.sync_time);
+                    
+                    struct timeval tv = {
+                        .tv_sec = s_telemetry.sync_time,
+                        .tv_usec = 0
+                    };
+                    settimeofday(&tv, NULL);
                 }
                 break;
             case 0x08: // Sound & Light

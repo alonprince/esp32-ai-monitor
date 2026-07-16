@@ -3,6 +3,7 @@ import sys
 import json
 import os
 import argparse
+import datetime
 from bleak import BleakScanner, BleakClient
 
 # GATT Service & Characteristic UUIDs
@@ -78,7 +79,8 @@ class BLECommandProcessor:
             payload = encode_tlv(TYPE_WORKSPACE, ws_val.encode('utf-8'))
             print(f"  -> WORKSPACE: {ws_val}")
         elif cmd == "tool":
-            tool_val = str(kwargs.get("value", ""))[:64]
+            # Extended active_tool buffer can take up to 255 bytes (TLV max length)
+            tool_val = str(kwargs.get("value", ""))[:255]
             payload = encode_tlv(TYPE_TOOL, tool_val.encode('utf-8'))
             print(f"  -> TOOL: {tool_val}")
         elif cmd == "preview":
@@ -95,9 +97,16 @@ class BLECommandProcessor:
             vol = min(max(kwargs.get("vol", 50), 0), 100)
             payload = encode_tlv(TYPE_SOUND_LIGHT, bytes([bright, vol]))
             print(f"  -> SOUND: bright={bright}% vol={vol}%")
+        elif cmd == "sync_time":
+            # Send current host local time cast as UTC Unix timestamp
+            now = datetime.datetime.now()
+            local_epoch = int(now.replace(tzinfo=datetime.timezone.utc).timestamp())
+            payload = encode_tlv(TYPE_SYNC_TIME, local_epoch.to_bytes(4, byteorder='big'))
+            print(f"  -> SYNC_TIME: local_epoch={local_epoch} ({now.strftime('%Y-%m-%d %H:%M:%S')})")
         
         if payload:
-            await self.client.write_gatt_char(WRITE_CHAR_UUID, payload, response=False)
+            # Set response=True to support write request for packets exceeding default MTU size
+            await self.client.write_gatt_char(WRITE_CHAR_UUID, payload, response=True)
             return True
         return False
 
@@ -152,10 +161,11 @@ async def interactive_shell(processor: BLECommandProcessor):
     print("  state <1-4>              - Change agent state (1: Idle, 2: Working, 3: Confirm, 4: Question)")
     print("  agent <name>             - Change agent name")
     print("  workspace <name>         - Change workspace folder name")
-    print("  tool <command>           - Change active tool command")
+    print("  tool <command>           - Change active tool command (supports multiple separated by '|')")
     print("  preview <text>           - Change message preview snippet")
     print("  stats <codex> <agy>      - Change Codex (0-100) and Antigravity (0-100) usage arcs")
     print("  sound <bright> <vol>     - Change brightness and volume (0-100)")
+    print("  sync_time                - Synchronize current host local time to ESP32 RTC")
     print("  exit                     - Disconnect and exit")
     print("-------------------------------------------------")
     if DEFAULT_SOCKET in sys.argv:
@@ -171,7 +181,7 @@ async def interactive_shell(processor: BLECommandProcessor):
             if not line:
                 break
             
-            parts = line.strip().split(maxsplit=2)
+            parts = line.strip().split(maxsplit=1)
             if not parts:
                 continue
                 
@@ -180,59 +190,56 @@ async def interactive_shell(processor: BLECommandProcessor):
                 break
             
             kwargs = {}
+            arg = parts[1] if len(parts) > 1 else ""
             
             if cmd == "state":
-                if len(parts) >= 2:
-                    kwargs["value"] = int(parts[1])
+                if arg:
+                    kwargs["value"] = int(arg)
                 else:
                     print("Usage: state <1-4>")
                     continue
             elif cmd == "agent":
-                if len(parts) >= 2:
-                    kwargs["value"] = parts[1]
+                if arg:
+                    kwargs["value"] = arg
                 else:
                     print("Usage: agent <name>")
                     continue
             elif cmd == "workspace":
-                if len(parts) >= 2:
-                    kwargs["value"] = parts[1]
+                if arg:
+                    kwargs["value"] = arg
                 else:
                     print("Usage: workspace <name>")
                     continue
             elif cmd == "tool":
-                if len(parts) >= 2:
-                    kwargs["value"] = parts[1] + (" " + parts[2] if len(parts) > 2 else "")
+                if arg:
+                    kwargs["value"] = arg
                 else:
                     print("Usage: tool <command>")
                     continue
             elif cmd == "preview":
-                if len(parts) >= 2:
-                    kwargs["value"] = parts[1] + (" " + parts[2] if len(parts) > 2 else "")
+                if arg:
+                    kwargs["value"] = arg
                 else:
                     print("Usage: preview <text>")
                     continue
             elif cmd == "stats":
-                subparts = parts[1].split() if len(parts) >= 2 else []
-                if len(parts) >= 3:
-                    kwargs["codex"] = int(parts[1])
-                    kwargs["agy"] = int(parts[2])
-                elif len(subparts) == 2:
+                subparts = arg.split()
+                if len(subparts) == 2:
                     kwargs["codex"] = int(subparts[0])
                     kwargs["agy"] = int(subparts[1])
                 else:
                     print("Usage: stats <codex (0-100)> <agy (0-100)>")
                     continue
             elif cmd == "sound":
-                subparts = parts[1].split() if len(parts) >= 2 else []
-                if len(parts) >= 3:
-                    kwargs["bright"] = int(parts[1])
-                    kwargs["vol"] = int(parts[2])
-                elif len(subparts) == 2:
+                subparts = arg.split()
+                if len(subparts) == 2:
                     kwargs["bright"] = int(subparts[0])
                     kwargs["vol"] = int(subparts[1])
                 else:
                     print("Usage: sound <brightness (0-100)> <volume (0-100)>")
                     continue
+            elif cmd == "sync_time":
+                pass
             else:
                 print(f"Unknown command: {cmd}")
                 continue
@@ -289,6 +296,13 @@ async def main():
         await client.start_notify(NOTIFY_CHAR_UUID, notification_handler)
         
         processor = BLECommandProcessor(client)
+        
+        # Automatically sync time upon connection
+        print("Synchronizing device time...")
+        try:
+            await processor.process_command("sync_time")
+        except Exception as e:
+            print(f"Failed to auto-sync time: {e}")
         
         if args.socket:
             socket_task = asyncio.create_task(
