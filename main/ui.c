@@ -55,6 +55,7 @@ static lv_obj_t *empty_layout = NULL;
 static lv_obj_t *task_layout = NULL;
 static lv_obj_t *section_header_lbl = NULL;
 static lv_obj_t *footer_progress_lbl = NULL;
+static lv_obj_t *footer_progress_pct_lbl = NULL;
 static lv_obj_t *footer_time_lbl = NULL;
 static lv_obj_t *footer_time_cnt = NULL;
 
@@ -357,11 +358,19 @@ static void create_dashboard_screen(void)
     
     // Bottom Footer
     footer_progress_lbl = lv_label_create(dashboard_screen);
-    lv_label_set_text(footer_progress_lbl, "0%");
+    lv_label_set_text(footer_progress_lbl, "0");
     lv_obj_set_style_text_color(footer_progress_lbl, COLOR_TEXT, 0);
-    // Adjusted progress percentage size to Montserrat-36 to match the visual scale proportion
-    lv_obj_set_style_text_font(footer_progress_lbl, &lv_font_montserrat_36, 0);
+    // Adjusted progress number size to Montserrat-48 (clock scale)
+    lv_obj_set_style_text_font(footer_progress_lbl, &lv_font_montserrat_48, 0);
     lv_obj_align(footer_progress_lbl, LV_ALIGN_BOTTOM_LEFT, 32, -24);
+    
+    // Separate smaller '%' symbol label
+    footer_progress_pct_lbl = lv_label_create(dashboard_screen);
+    lv_label_set_text(footer_progress_pct_lbl, "%");
+    lv_obj_set_style_text_color(footer_progress_pct_lbl, COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(footer_progress_pct_lbl, &lv_font_montserrat_24, 0);
+    // Position it dynamically next to the number
+    lv_obj_align_to(footer_progress_pct_lbl, footer_progress_lbl, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -6);
     
     footer_time_cnt = lv_obj_create(dashboard_screen);
     lv_obj_set_size(footer_time_cnt, 110, 24);
@@ -577,14 +586,16 @@ void ui_update_telemetry(const ble_telemetry_data_t *data)
     snprintf(section_hdr, sizeof(section_hdr), "CURRENT TASK (%d)", task_idx);
     lv_label_set_text(section_header_lbl, section_hdr);
     
-    // 4. Update Footer Percentage
+    // 4. Update Footer Percentage (Number and PCT symbol split)
     uint8_t progress = data->progress_current;
     if (progress > 100) progress = 100;
     
-    // Bottom-Left progress percentage
     char progress_buf[16];
-    snprintf(progress_buf, sizeof(progress_buf), "%d%%", progress);
+    snprintf(progress_buf, sizeof(progress_buf), "%d", progress);
     lv_label_set_text(footer_progress_lbl, progress_buf);
+    
+    // Dynamic re-align to keep '%' symbol snapped to the right edge of the shifting numbers
+    lv_obj_align_to(footer_progress_pct_lbl, footer_progress_lbl, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -6);
     
     // 5. Update last updated time badge from local synchronized RTC
     time_t now;
