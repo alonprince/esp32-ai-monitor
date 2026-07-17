@@ -129,6 +129,55 @@ def format_telemetry_task(name: str, task_id: str, time_str: str = "00:00", stat
         
     return f"{clean_name},{clean_id},{time_str},{status}"
 
+def parse_token_value(val_str: str) -> int:
+    val_str = val_str.strip().upper()
+    try:
+        if val_str.endswith("M"):
+            return int(float(val_str[:-1]) * 1_000_000)
+        elif val_str.endswith("K"):
+            return int(float(val_str[:-1]) * 1_000)
+        else:
+            return int(float(val_str))
+    except Exception:
+        return 0
+
+async def get_codex_usage_percentage(limit: int) -> int:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "opencode", "stats", "--days", "7",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        output = stdout.decode('utf-8', errors='ignore')
+        
+        # 1. Parse Total Cost
+        cost_match = re.search(r"Total Cost\s+\$([0-9.]+)", output)
+        total_cost = 0.0
+        if cost_match:
+            total_cost = float(cost_match.group(1))
+            
+        # 2. Parse Input & Output tokens
+        input_match = re.search(r"Input\s+([0-9.MK]+)", output)
+        output_match = re.search(r"Output\s+([0-9.MK]+)", output)
+        
+        input_tokens = parse_token_value(input_match.group(1)) if input_match else 0
+        output_tokens = parse_token_value(output_match.group(1)) if output_match else 0
+        
+        # If limit is small (e.g. <= 1000), treat as dollar budget (e.g. 10 = $10.00)
+        if limit <= 1000:
+            percentage = min(int((total_cost / limit) * 100), 100)
+            print(f"[Stats] Codex Quota: ${total_cost:.2f} / ${limit:.2f} ({percentage}%)")
+        else:
+            total_tokens = input_tokens + output_tokens
+            percentage = min(int((total_tokens / limit) * 100), 100)
+            print(f"[Stats] Codex Quota: {total_tokens:,} / {limit:,} tokens ({percentage}%)")
+            
+        return percentage
+    except Exception as e:
+        print(f"[Stats] Error fetching Codex stats: {e}")
+    return 0
+
 async def handle_json_command(processor: BLECommandProcessor, json_str: str):
     """Parse a JSON command string and process it."""
     try:
@@ -188,13 +237,11 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             await processor.process_command("tool", value=tool_val)
             await processor.process_command("preview", value=preview_val)
             
-            # Get latest info from SQLite for stats
-            if latest_info:
-                tokens_used = latest_info["tokens_used"]
-                limit = getattr(processor, "codex_limit", 100_000_000)
-                percentage = min(int((tokens_used / limit) * 100), 100)
-                await processor.process_command("stats", codex=percentage, agy=0)
-                print(f"[HookEvent] Event={event} Tool={tool} Tokens={tokens_used} ({percentage}%) TaskName={task_name} TaskID={task_id[:8]}")
+            # Send stats (use overall account usage percentage)
+            limit = getattr(processor, "codex_limit", 10)
+            percentage = await get_codex_usage_percentage(limit)
+            await processor.process_command("stats", codex=percentage, agy=0)
+            print(f"[HookEvent] Event={event} Tool={tool} Quota={percentage}% TaskName={task_name} TaskID={task_id[:8]}")
         else:
             await processor.process_command(cmd, **{k: v for k, v in msg.items() if k != "cmd"})
     except json.JSONDecodeError as e:
@@ -354,6 +401,13 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
     last_tokens_used = -1
     last_session_id = None
     
+    # Run once on startup to sync the initial quota
+    try:
+        percentage = await get_codex_usage_percentage(limit)
+        await processor.process_command("stats", codex=percentage, agy=0)
+    except Exception:
+        pass
+    
     while True:
         try:
             info = get_latest_codex_session_info()
@@ -366,7 +420,8 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
                     last_tokens_used = tokens_used
                     last_session_id = session_id
                     
-                    percentage = min(int((tokens_used / limit) * 100), 100)
+                    # Fetch overall usage/quota percentage (corresponds to /status command)
+                    percentage = await get_codex_usage_percentage(limit)
                     await processor.process_command("stats", codex=percentage, agy=0)
                     
                     # Also update the task details (Task Name, Task ID) if not idle
@@ -374,7 +429,7 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
                     task_val = format_telemetry_task(preview, clean_id, status="working")
                     await processor.process_command("tool", value=task_val)
                     
-                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Tokens={tokens_used} ({percentage}%) Preview={preview[:40]}...")
+                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Quota={percentage}% Preview={preview[:40]}...")
         except Exception as e:
             print(f"[AutoWatcher] Codex DB error: {e}")
             
@@ -384,7 +439,7 @@ async def main():
     parser = argparse.ArgumentParser(description="BLE host for ESP32 AI Monitor")
     parser.add_argument("--address", help="Device MAC or UUID address (optional)")
     parser.add_argument("--socket", default=DEFAULT_SOCKET, help=f"Unix socket path for JSON commands (default: {DEFAULT_SOCKET})")
-    parser.add_argument("--codex-limit", type=int, default=100_000_000, help="Codex token limit (default: 100,000,000)")
+    parser.add_argument("--codex-limit", type=int, default=10, help="Codex limit/budget: <=1000 for dollar budget (e.g. 10 for $10.00), >1000 for weekly token limit (default: 10)")
     args = parser.parse_args()
 
     device = None
