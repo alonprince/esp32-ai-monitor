@@ -1,0 +1,24 @@
+{
+  "name": "esp32-ai-monitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alonprince/esp32-ai-monitor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/alonprince/esp32-ai-monitor/issues"
+  },
+  "homepage": "https://github.com/alonprince/esp32-ai-monitor#readme",
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}

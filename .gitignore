@@ -28,3 +28,7 @@ Thumbs.db
 
 # Serial lock files
 /var/spool/uucp/
+
+# Node.js dependencies
+node_modules/
+
