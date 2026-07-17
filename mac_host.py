@@ -166,17 +166,19 @@ async def get_codex_usage_percentage(limit: int) -> int:
         
         # If limit is small (e.g. <= 1000), treat as dollar budget (e.g. 10 = $10.00)
         if limit <= 1000:
-            percentage = min(int((total_cost / limit) * 100), 100)
-            print(f"[Stats] Codex Quota: ${total_cost:.2f} / ${limit:.2f} ({percentage}%)")
+            used_percentage = min(int((total_cost / limit) * 100), 100)
+            remaining_percentage = max(0, 100 - used_percentage)
+            print(f"[Stats] Codex Quota: ${total_cost:.2f} / ${limit:.2f} (Remaining: {remaining_percentage}%)")
         else:
             total_tokens = input_tokens + output_tokens
-            percentage = min(int((total_tokens / limit) * 100), 100)
-            print(f"[Stats] Codex Quota: {total_tokens:,} / {limit:,} tokens ({percentage}%)")
+            used_percentage = min(int((total_tokens / limit) * 100), 100)
+            remaining_percentage = max(0, 100 - used_percentage)
+            print(f"[Stats] Codex Quota: {total_tokens:,} / {limit:,} tokens (Remaining: {remaining_percentage}%)")
             
-        return percentage
+        return remaining_percentage
     except Exception as e:
         print(f"[Stats] Error fetching Codex stats: {e}")
-    return 0
+    return 100
 
 async def handle_json_command(processor: BLECommandProcessor, json_str: str):
     """Parse a JSON command string and process it."""
