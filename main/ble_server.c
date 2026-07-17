@@ -135,6 +135,8 @@ static void ble_server_parse_tlv(const uint8_t *data, uint16_t len)
                         .tv_usec = 0
                     };
                     settimeofday(&tv, NULL);
+                    extern void time_persist_sync(time_t epoch_sec);
+                    time_persist_sync(s_telemetry.sync_time);
                 }
                 break;
             case 0x08: // Sound & Light

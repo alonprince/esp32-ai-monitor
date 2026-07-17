@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
+#include "esp_attr.h"
+#include "esp_rtc_time.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -283,8 +286,51 @@ static void lvgl_task(void *arg)
     }
 }
 
+// Define a structure to hold persistent time info in RTC memory
+typedef struct {
+    uint32_t magic;
+    uint64_t sync_rtc_us;
+    time_t sync_epoch;
+} persistent_time_t;
+
+static RTC_NOINIT_ATTR persistent_time_t s_persistent_time;
+
+void time_persist_sync(time_t epoch_sec)
+{
+    s_persistent_time.magic = 0x54494D45; // "TIME"
+    s_persistent_time.sync_rtc_us = esp_rtc_get_time_us();
+    s_persistent_time.sync_epoch = epoch_sec;
+    ESP_LOGI(TAG, "Saved sync time to RTC: %lld at RTC us %llu", (long long)epoch_sec, s_persistent_time.sync_rtc_us);
+}
+
+void time_persist_restore(void)
+{
+    if (s_persistent_time.magic == 0x54494D45) {
+        uint64_t now_rtc_us = esp_rtc_get_time_us();
+        if (now_rtc_us >= s_persistent_time.sync_rtc_us) {
+            uint64_t elapsed_us = now_rtc_us - s_persistent_time.sync_rtc_us;
+            time_t elapsed_sec = elapsed_us / 1000000;
+            time_t current_epoch = s_persistent_time.sync_epoch + elapsed_sec;
+            
+            struct timeval tv = {
+                .tv_sec = current_epoch,
+                .tv_usec = elapsed_us % 1000000
+            };
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "Restored time from RTC: %lld (elapsed %lld s)", (long long)current_epoch, (long long)elapsed_sec);
+        } else {
+            // RTC timer wrapped or reset
+            s_persistent_time.magic = 0;
+            ESP_LOGW(TAG, "RTC timer wrapped, invalidating cache");
+        }
+    } else {
+        ESP_LOGI(TAG, "No valid time sync in RTC memory");
+    }
+}
+
 void app_main(void)
 {
+    time_persist_restore();
     init_pmu();
 
     ESP_LOGI(TAG, "Initializing QSPI bus...");
