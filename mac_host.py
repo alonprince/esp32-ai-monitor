@@ -7,6 +7,7 @@ import datetime
 import glob
 import re
 import time
+import sqlite3
 from bleak import BleakScanner, BleakClient
 
 # GATT Service & Characteristic UUIDs
@@ -122,7 +123,47 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
         if not cmd:
             print(f"[Socket] Invalid command, missing 'cmd' field: {json_str}")
             return
-        await processor.process_command(cmd, **{k: v for k, v in msg.items() if k != "cmd"})
+        
+        if cmd == "codeisland_payload":
+            payload = msg.get("payload", {})
+            event = payload.get("hook_event_name") or payload.get("event")
+            tool = payload.get("tool_name") or payload.get("tool")
+            
+            # Map hook events to state and active tool
+            if event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
+                state_val = STATE_WORKING
+                tool_val = tool if tool else "Working"
+                preview_val = f"Event: {event}"
+                if tool:
+                    preview_val = f"Tool: {tool}"
+            elif event in ("Stop", "SessionStart", "SubagentStop"):
+                state_val = STATE_IDLE
+                tool_val = "None"
+                preview_val = "Idle"
+            elif event == "SessionEnd":
+                state_val = STATE_IDLE
+                tool_val = "None"
+                preview_val = "Session ended"
+            else:
+                state_val = STATE_IDLE
+                tool_val = "None"
+                preview_val = f"Event: {event}"
+                
+            # Send state, tool, and preview to the ESP32
+            await processor.process_command("state", value=state_val)
+            await processor.process_command("tool", value=tool_val)
+            await processor.process_command("preview", value=preview_val)
+            
+            # Get latest info from SQLite
+            latest_info = get_latest_codex_session_info()
+            if latest_info:
+                tokens_used = latest_info["tokens_used"]
+                limit = getattr(processor, "codex_limit", 100_000_000)
+                percentage = min(int((tokens_used / limit) * 100), 100)
+                await processor.process_command("stats", codex=percentage, agy=0)
+                print(f"[HookEvent] Event={event} Tool={tool_val} Tokens={tokens_used} ({percentage}%)")
+        else:
+            await processor.process_command(cmd, **{k: v for k, v in msg.items() if k != "cmd"})
     except json.JSONDecodeError as e:
         print(f"[Socket] JSON parse error: {e}")
     except Exception as e:
@@ -254,119 +295,56 @@ async def interactive_shell(processor: BLECommandProcessor):
             print(f"Error executing command: {e}")
 
 
-async def get_latest_transcript_data():
-    brain_dir = os.path.expanduser("~/.gemini/antigravity-cli/brain")
-    if not os.path.exists(brain_dir):
-        return None, 0
-    
-    files = []
-    for root, dirs, filenames in os.walk(brain_dir):
-        if "transcript.jsonl" in filenames:
-            files.append(os.path.join(root, "transcript.jsonl"))
-            
-    if not files:
-        return None, 0
-        
-    # Get the latest modified file
-    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    latest_file = files[0]
-    mtime = os.path.getmtime(latest_file)
-    
+def get_latest_codex_session_info():
+    db_path = os.path.expanduser("~/.codex/state_5.sqlite")
+    if not os.path.exists(db_path):
+        return None
     try:
-        with open(latest_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            for line in reversed(lines):
-                line = line.strip()
-                if line:
-                    return json.loads(line), mtime
-    except Exception:
-        pass
-        
-    return None, 0
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, tokens_used, preview, cwd FROM threads ORDER BY updated_at DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {
+                "id": row[0],
+                "tokens_used": row[1],
+                "preview": row[2],
+                "cwd": row[3]
+            }
+    except Exception as e:
+        print(f"[CodexDB] Error querying latest session: {e}")
+    return None
 
-async def auto_watcher_loop(processor: BLECommandProcessor):
-    print("[AutoWatcher] Started background watcher for Codex tasks...")
-    
-    last_step_index = -1
-    last_state = None
+async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
+    print("[AutoWatcher] Started background loop monitoring Codex SQLite database...")
+    last_tokens_used = -1
+    last_session_id = None
     
     while True:
         try:
-            data, mtime = await get_latest_transcript_data()
-            now = time.time()
-            
-            # If the file was updated in the last 15 seconds, we assume Codex is active
-            is_active = (now - mtime) < 15.0
-            
-            if is_active and data:
-                step_idx = data.get("step_index", 0)
+            info = get_latest_codex_session_info()
+            if info:
+                session_id = info["id"]
+                tokens_used = info["tokens_used"]
                 
-                # Check if it's a new step or state change
-                if step_idx != last_step_index or last_state != STATE_WORKING:
-                    last_step_index = step_idx
-                    last_state = STATE_WORKING
+                if tokens_used != last_tokens_used or session_id != last_session_id:
+                    last_tokens_used = tokens_used
+                    last_session_id = session_id
                     
-                    # Determine active tool or preview
-                    tool_desc = "Working"
-                    if "tool_calls" in data and data["tool_calls"]:
-                        tool_desc = data["tool_calls"][0].get("name", "working")
-                    elif data.get("type") == "RUN_COMMAND":
-                        tool_desc = "run_command"
-                        
-                    # Send state working (2)
-                    await processor.process_command("state", value=STATE_WORKING)
-                    # Send tool description
-                    await processor.process_command("tool", value=tool_desc)
-                    # Send step preview
-                    preview_txt = f"Step {step_idx}: {tool_desc}"
-                    await processor.process_command("preview", value=preview_txt)
-            else:
-                # Idle state: BLE_STATE_IDLE (1)
-                if last_state != STATE_IDLE:
-                    last_state = STATE_IDLE
-                    await processor.process_command("state", value=STATE_IDLE)
-                    await processor.process_command("tool", value="None")
-                    await processor.process_command("preview", value="Idle")
-                    
+                    percentage = min(int((tokens_used / limit) * 100), 100)
+                    await processor.process_command("stats", codex=percentage, agy=0)
+                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Tokens={tokens_used} ({percentage}%)")
         except Exception as e:
-            print(f"[AutoWatcher] Error: {e}")
+            print(f"[AutoWatcher] Codex DB error: {e}")
             
-        await asyncio.sleep(1.0)
-
-async def auto_stats_loop(processor: BLECommandProcessor):
-    print("[AutoStats] Started background loop to monitor Codex usage limit...")
-    while True:
-        try:
-            # Run "opencode stats" in subprocess
-            proc = await asyncio.create_subprocess_exec(
-                "opencode", "stats",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            output = stdout.decode('utf-8', errors='ignore')
-            
-            # Extract Total Cost
-            cost_match = re.search(r"Total Cost\s+\$([0-9.]+)", output)
-            if cost_match:
-                total_cost = float(cost_match.group(1))
-                # Map cost to percentage of a $10.00 daily/monthly limit
-                budget = 10.00
-                percentage = min(int((total_cost / budget) * 100), 100)
-                
-                # Send stats (Codex = percentage, Antigravity = 0)
-                await processor.process_command("stats", codex=percentage, agy=0)
-                print(f"[AutoStats] Token Quota Used: {percentage}% (Cost: ${total_cost:.2f} / Budget: ${budget:.2f})")
-        except Exception as e:
-            print(f"[AutoStats] Error: {e}")
-            
-        # Refresh every 30 seconds
-        await asyncio.sleep(30.0)
+        await asyncio.sleep(5.0)
 
 async def main():
     parser = argparse.ArgumentParser(description="BLE host for ESP32 AI Monitor")
     parser.add_argument("--address", help="Device MAC or UUID address (optional)")
     parser.add_argument("--socket", default=DEFAULT_SOCKET, help=f"Unix socket path for JSON commands (default: {DEFAULT_SOCKET})")
+    parser.add_argument("--codex-limit", type=int, default=100_000_000, help="Codex token limit (default: 100,000,000)")
     args = parser.parse_args()
 
     device = None
@@ -408,6 +386,8 @@ async def main():
         await client.start_notify(NOTIFY_CHAR_UUID, notification_handler)
         
         processor = BLECommandProcessor(client)
+        # Store configuration on processor for access in json command handler
+        processor.codex_limit = args.codex_limit
         
         # Automatically sync time upon connection
         print("Synchronizing device time...")
@@ -416,9 +396,8 @@ async def main():
         except Exception as e:
             print(f"Failed to auto-sync time: {e}")
         
-        # Start background automatic watchers for tasks and token quota
-        watcher_task = asyncio.create_task(auto_watcher_loop(processor))
-        stats_task = asyncio.create_task(auto_stats_loop(processor))
+        # Start background automatic watcher for Codex database
+        db_task = asyncio.create_task(auto_codex_db_loop(processor, args.codex_limit))
 
         if args.socket:
             socket_task = asyncio.create_task(
@@ -431,14 +410,12 @@ async def main():
         
         if socket_task:
             socket_task.cancel()
-        watcher_task.cancel()
-        stats_task.cancel()
+        db_task.cancel()
         
         try:
             if socket_task:
                 await socket_task
-            await watcher_task
-            await stats_task
+            await db_task
         except asyncio.CancelledError:
             pass
         
