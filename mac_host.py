@@ -115,6 +115,20 @@ class BLECommandProcessor:
         return False
 
 
+def format_telemetry_task(name: str, task_id: str, time_str: str = "00:00", status: str = "working") -> str:
+    # Clean up fields to prevent parsing errors (commas and pipes are separators)
+    clean_name = str(name).replace(",", " ").replace("|", " ").strip()
+    # Limit length of name to keep packet size small and fit on screen
+    clean_name = clean_name[:40] if clean_name else "Codex Task"
+    
+    clean_id = str(task_id).replace(",", "").replace("|", "").strip()
+    if len(clean_id) > 8:
+        clean_id = clean_id[:8]
+    elif not clean_id:
+        clean_id = "---"
+        
+    return f"{clean_name},{clean_id},{time_str},{status}"
+
 async def handle_json_command(processor: BLECommandProcessor, json_str: str):
     """Parse a JSON command string and process it."""
     try:
@@ -128,14 +142,34 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             payload = msg.get("payload", {})
             event = payload.get("hook_event_name") or payload.get("event")
             tool = payload.get("tool_name") or payload.get("tool")
+            session_id = payload.get("session_id")
             
-            # Map hook events to state and active tool
+            # Query SQLite for latest prompt and details
+            latest_info = get_latest_codex_session_info()
+            
+            # Extract Task Name (prompt) and Task ID
+            task_name = "Codex Task"
+            task_id = "---"
+            if latest_info:
+                task_name = latest_info["preview"]
+                task_id = latest_info["id"]
+            elif session_id:
+                task_id = session_id
+                
+            # Clean session_id if it has opencode prefix
+            if task_id.startswith("opencode-"):
+                task_id = task_id.replace("opencode-", "")
+            
+            # Map hook events to state and tool payload
             if event in ("UserPromptSubmit", "PreToolUse", "PostToolUse"):
                 state_val = STATE_WORKING
-                tool_val = tool if tool else "Working"
-                preview_val = f"Event: {event}"
+                status_str = "working"
+                # Format active tool as: name,id,time,status
+                display_name = task_name
                 if tool:
-                    preview_val = f"Tool: {tool}"
+                    display_name = f"{task_name} ({tool})"
+                tool_val = format_telemetry_task(display_name, task_id, status=status_str)
+                preview_val = f"Tool: {tool}" if tool else f"Event: {event}"
             elif event in ("Stop", "SessionStart", "SubagentStop"):
                 state_val = STATE_IDLE
                 tool_val = "None"
@@ -154,14 +188,13 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             await processor.process_command("tool", value=tool_val)
             await processor.process_command("preview", value=preview_val)
             
-            # Get latest info from SQLite
-            latest_info = get_latest_codex_session_info()
+            # Get latest info from SQLite for stats
             if latest_info:
                 tokens_used = latest_info["tokens_used"]
                 limit = getattr(processor, "codex_limit", 100_000_000)
                 percentage = min(int((tokens_used / limit) * 100), 100)
                 await processor.process_command("stats", codex=percentage, agy=0)
-                print(f"[HookEvent] Event={event} Tool={tool_val} Tokens={tokens_used} ({percentage}%)")
+                print(f"[HookEvent] Event={event} Tool={tool} Tokens={tokens_used} ({percentage}%) TaskName={task_name} TaskID={task_id[:8]}")
         else:
             await processor.process_command(cmd, **{k: v for k, v in msg.items() if k != "cmd"})
     except json.JSONDecodeError as e:
@@ -327,6 +360,7 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
             if info:
                 session_id = info["id"]
                 tokens_used = info["tokens_used"]
+                preview = info["preview"]
                 
                 if tokens_used != last_tokens_used or session_id != last_session_id:
                     last_tokens_used = tokens_used
@@ -334,7 +368,13 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
                     
                     percentage = min(int((tokens_used / limit) * 100), 100)
                     await processor.process_command("stats", codex=percentage, agy=0)
-                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Tokens={tokens_used} ({percentage}%)")
+                    
+                    # Also update the task details (Task Name, Task ID) if not idle
+                    clean_id = session_id.replace("opencode-", "")
+                    task_val = format_telemetry_task(preview, clean_id, status="working")
+                    await processor.process_command("tool", value=task_val)
+                    
+                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Tokens={tokens_used} ({percentage}%) Preview={preview[:40]}...")
         except Exception as e:
             print(f"[AutoWatcher] Codex DB error: {e}")
             
