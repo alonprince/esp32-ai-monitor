@@ -104,3 +104,36 @@ Modified mac_host.py to parse opencode stats output and compute the overall bill
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Report remaining quota percentage instead of used percentage
+
+**Date**: 2026-07-17
+**Task**: Report remaining quota percentage instead of used percentage
+**Branch**: `feature/ui-fixes`
+
+### Summary
+
+Updated mac_host.py to calculate remaining percentage (100 - used_percentage) for Codex quota and return 100% on error.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d4c795` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
