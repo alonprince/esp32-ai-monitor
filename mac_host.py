@@ -115,7 +115,26 @@ class BLECommandProcessor:
         return False
 
 
+def clean_chinese_to_pinyin(text: str) -> str:
+    if not text:
+        return ""
+    # Check if there is any Chinese character
+    if not any('\u4e00' <= char <= '\u9fff' for char in text):
+        return text
+        
+    try:
+        from pypinyin import pinyin, Style
+        pinyin_list = pinyin(text, style=Style.NORMAL)
+        result = " ".join(p[0] for p in pinyin_list)
+        return result.title()
+    except ImportError:
+        # Fallback: remove non-ascii characters to avoid crash
+        ascii_chars = [char for char in text if ord(char) < 128]
+        return "".join(ascii_chars)
+
 def format_telemetry_task(name: str, task_id: str, time_str: str = "00:00", status: str = "working") -> str:
+    # Convert Chinese characters to Pinyin to prevent rendering mojibake on Montserrat font
+    name = clean_chinese_to_pinyin(name)
     # Clean up fields to prevent parsing errors (commas and pipes are separators)
     clean_name = str(name).replace(",", " ").replace("|", " ").strip()
     # Limit length of name to keep packet size small and fit on screen
@@ -237,7 +256,7 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             # Send state, tool, and preview to the ESP32
             await processor.process_command("state", value=state_val)
             await processor.process_command("tool", value=tool_val)
-            await processor.process_command("preview", value=preview_val)
+            await processor.process_command("preview", value=clean_chinese_to_pinyin(preview_val))
             
             # Send stats (use overall account usage percentage)
             limit = getattr(processor, "codex_limit", 10)
