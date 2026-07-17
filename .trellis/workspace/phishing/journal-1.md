@@ -38,3 +38,36 @@ Replaced file watcher and subprocess loops with an event-driven hook socket list
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Format active tool string to map Task Name and ID on ESP32
+
+**Date**: 2026-07-17
+**Task**: Format active tool string to map Task Name and ID on ESP32
+**Branch**: `feature/ui-fixes`
+
+### Summary
+
+Updated handle_json_command and auto_codex_db_loop to format the active tool as a CSV payload (name,id,time,status) so that the ESP32 screen can parse and render the correct Task ID and Task Name (using the user prompt) when Codex runs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3e60d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
