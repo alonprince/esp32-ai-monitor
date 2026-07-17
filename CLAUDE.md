@@ -8,7 +8,8 @@ Guidelines and commands for developing the ESP32 AI Monitor firmware and associa
 - Monitor: `idf.py -p <PORT> monitor`
 
 ## Testing
-- Run JS simulation tests: `npm run test`
+- Run telemetry simulation tests: `python3 -m unittest discover -s test`
+
 
 ## Skill routing
 
