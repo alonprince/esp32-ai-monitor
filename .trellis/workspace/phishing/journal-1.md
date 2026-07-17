@@ -137,3 +137,36 @@ Updated mac_host.py to calculate remaining percentage (100 - used_percentage) fo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Convert Chinese text to Pinyin to prevent mojibake on Montserrat fonts
+
+**Date**: 2026-07-17
+**Task**: Convert Chinese text to Pinyin to prevent mojibake on Montserrat fonts
+**Branch**: `feature/ui-fixes`
+
+### Summary
+
+Added clean_chinese_to_pinyin helper in mac_host.py which converts Chinese characters to Pinyin using pypinyin (falling back to stripping non-ASCII if pypinyin is not found) to prevent mojibake on ESP32 screen using ASCII-only Montserrat fonts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74f29c2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
