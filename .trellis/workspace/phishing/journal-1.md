@@ -71,3 +71,36 @@ Updated handle_json_command and auto_codex_db_loop to format the active tool as 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Calculate and send overall account quota percentage instead of session tokens
+
+**Date**: 2026-07-17
+**Task**: Calculate and send overall account quota percentage instead of session tokens
+**Branch**: `feature/ui-fixes`
+
+### Summary
+
+Modified mac_host.py to parse opencode stats output and compute the overall billing/token quota percentage based on the configured limit (cost-based for budgets <=1000, token-based for limits >1000). Updates are triggered instantly when hook events or SQLite thread states change.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b2d44e3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
