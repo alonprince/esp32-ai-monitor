@@ -80,6 +80,30 @@ static esp_err_t axp_write_reg(uint8_t reg, uint8_t val)
     return err;
 }
 
+static void axp_read_battery_info(uint8_t *percentage, bool *is_charging)
+{
+    uint8_t reg = 0xA4;
+    uint8_t val = 0;
+    esp_err_t err = i2c_master_transmit_receive(axp_dev_handle, &reg, 1, &val, 1, 100);
+    if (err == ESP_OK) {
+        *percentage = (val > 100) ? 100 : val;
+    } else {
+        *percentage = 0;
+        ESP_LOGE(TAG, "Failed to read battery percent: %s", esp_err_to_name(err));
+    }
+
+    reg = 0x01; // Power status register
+    val = 0;
+    err = i2c_master_transmit_receive(axp_dev_handle, &reg, 1, &val, 1, 100);
+    if (err == ESP_OK) {
+        // Bit 3 (0x08) is battery charging status in AXP2101
+        *is_charging = (val & 0x08) != 0;
+    } else {
+        *is_charging = false;
+        ESP_LOGE(TAG, "Failed to read power status: %s", esp_err_to_name(err));
+    }
+}
+
 static void axp_display_power_cycle(void)
 {
     ESP_LOGI(TAG, "Power-cycling display via AXP2101 ALDO3...");
@@ -263,7 +287,15 @@ static void lvgl_task(void *arg)
 {
     ui_init();
 
+    // Query battery info immediately on boot
+    uint8_t init_batt = 0;
+    bool init_charging = false;
+    axp_read_battery_info(&init_batt, &init_charging);
+    ui_update_device_battery(init_batt, init_charging);
+
     uint32_t last_telemetry_check = 0;
+    uint32_t last_battery_check = 0;
+
     while (1) {
         uint32_t now = pdTICKS_TO_MS(xTaskGetTickCount());
         lv_tick_inc(5);
@@ -280,6 +312,14 @@ static void lvgl_task(void *arg)
                 ble_server_clear_update_flag();
             }
             last_telemetry_check = now;
+        }
+
+        if (now - last_battery_check >= 5000) {
+            uint8_t batt_pct = 0;
+            bool is_charging = false;
+            axp_read_battery_info(&batt_pct, &is_charging);
+            ui_update_device_battery(batt_pct, is_charging);
+            last_battery_check = now;
         }
 
         vTaskDelay(pdMS_TO_TICKS(sleep_ms));

@@ -38,6 +38,7 @@ extern const lv_font_t lv_font_montserrat_14;
 extern const lv_font_t lv_font_montserrat_18;
 extern const lv_font_t lv_font_montserrat_24;
 extern const lv_font_t lv_font_montserrat_36;
+extern const lv_font_t lv_font_source_han_sans_sc_16_cjk;
 #if CONFIG_LV_FONT_MONTSERRAT_48
 extern const lv_font_t lv_font_montserrat_48;
 #else
@@ -75,7 +76,7 @@ typedef struct {
     lv_obj_t *date_lbl;
     lv_obj_t *clock_lbl;
     lv_obj_t *secs_lbl;
-    lv_obj_t *wifi_icon;
+    lv_obj_t *battery_lbl;  // Shows Mac battery % with battery symbol in top-right
     lv_obj_t *bt_icon;
 } time_header_t;
 
@@ -106,21 +107,22 @@ static void create_time_header(lv_obj_t *parent, time_header_t *header)
     
     // Icons container on the top-right
     lv_obj_t *icons_cnt = lv_obj_create(cnt);
-    lv_obj_set_size(icons_cnt, 80, 30);
+    lv_obj_set_size(icons_cnt, 110, 30);
     lv_obj_align(icons_cnt, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_set_style_bg_opa(icons_cnt, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(icons_cnt, 0, 0);
     lv_obj_set_style_pad_all(icons_cnt, 0, 0);
     lv_obj_set_flex_flow(icons_cnt, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(icons_cnt, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(icons_cnt, 12, 0);
+    lv_obj_set_style_pad_column(icons_cnt, 10, 0);
     lv_obj_remove_flag(icons_cnt, LV_OBJ_FLAG_SCROLLABLE);
-    
-    header->wifi_icon = lv_label_create(icons_cnt);
-    lv_label_set_text(header->wifi_icon, LV_SYMBOL_WIFI);
-    lv_obj_set_style_text_color(header->wifi_icon, COLOR_TEXT_SEC, 0);
-    lv_obj_set_style_text_font(header->wifi_icon, &lv_font_montserrat_18, 0);
-    
+
+    // Battery label: battery symbol + percentage e.g. "🔋 100%"
+    header->battery_lbl = lv_label_create(icons_cnt);
+    lv_label_set_text(header->battery_lbl, LV_SYMBOL_BATTERY_FULL " --%");
+    lv_obj_set_style_text_color(header->battery_lbl, COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(header->battery_lbl, &lv_font_montserrat_14, 0);
+
     header->bt_icon = lv_label_create(icons_cnt);
     lv_label_set_text(header->bt_icon, LV_SYMBOL_BLUETOOTH);
     lv_obj_set_style_text_color(header->bt_icon, COLOR_TEXT_SEC, 0);
@@ -338,7 +340,7 @@ static void create_dashboard_screen(void)
         task_rows[i].name_lbl = lv_label_create(task_rows[i].row_cnt);
         lv_label_set_text(task_rows[i].name_lbl, "Task Name");
         lv_obj_set_style_text_color(task_rows[i].name_lbl, COLOR_BG, 0);
-        lv_obj_set_style_text_font(task_rows[i].name_lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(task_rows[i].name_lbl, &lv_font_source_han_sans_sc_16_cjk, 0);
         lv_obj_align(task_rows[i].name_lbl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         
         task_rows[i].status_lbl = lv_label_create(task_rows[i].row_cnt);
@@ -374,19 +376,26 @@ static void create_dashboard_screen(void)
     lv_obj_align_to(footer_progress_pct_lbl, footer_progress_lbl, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -5);
     
     footer_time_cnt = lv_obj_create(dashboard_screen);
-    lv_obj_set_size(footer_time_cnt, 110, 24);
+    lv_obj_set_size(footer_time_cnt, 120, 28);
     lv_obj_align(footer_time_cnt, LV_ALIGN_BOTTOM_RIGHT, -32, -28);
     lv_obj_set_style_bg_color(footer_time_cnt, COLOR_AMBER, 0); // Solid orange
     lv_obj_set_style_border_width(footer_time_cnt, 0, 0);
-    lv_obj_set_style_radius(footer_time_cnt, 4, 0); // slightly rounded
+    lv_obj_set_style_radius(footer_time_cnt, 6, 0);
     lv_obj_set_style_pad_all(footer_time_cnt, 0, 0);
     lv_obj_remove_flag(footer_time_cnt, LV_OBJ_FLAG_SCROLLABLE);
-    
+
     footer_time_lbl = lv_label_create(footer_time_cnt);
-    lv_label_set_text(footer_time_lbl, "--/-- --:--");
-    lv_obj_set_style_text_color(footer_time_lbl, COLOR_BG, 0); // Black time text
+    lv_label_set_text(footer_time_lbl, "--");
+    lv_obj_set_style_text_color(footer_time_lbl, COLOR_BG, 0); // Black text
     lv_obj_set_style_text_font(footer_time_lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(footer_time_lbl);
+
+    // "RESETS" caption placed to the left of the orange badge
+    lv_obj_t *footer_reset_caption = lv_label_create(dashboard_screen);
+    lv_label_set_text(footer_reset_caption, "RESETS");
+    lv_obj_set_style_text_color(footer_reset_caption, COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(footer_reset_caption, &lv_font_montserrat_14, 0);
+    lv_obj_align_to(footer_reset_caption, footer_time_cnt, LV_ALIGN_OUT_LEFT_MID, -8, 0);
 }
 
 static void create_approval_screen(void)
@@ -410,7 +419,7 @@ static void create_approval_screen(void)
     approval_cmd_label = lv_label_create(approval_screen);
     lv_label_set_text(approval_cmd_label, "No command pending");
     lv_obj_set_style_text_color(approval_cmd_label, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(approval_cmd_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(approval_cmd_label, &lv_font_source_han_sans_sc_16_cjk, 0);
     lv_obj_set_style_text_align(approval_cmd_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(approval_cmd_label, 440);
     lv_obj_align(approval_cmd_label, LV_ALIGN_CENTER, 0, 0);
@@ -504,7 +513,8 @@ void ui_update_telemetry(const ble_telemetry_data_t *data)
     // Update Bluetooth status icon in top-right header (connected = Cyan)
     lv_obj_set_style_text_color(header_dash.bt_icon, COLOR_CYAN, 0);
     lv_obj_set_style_text_color(header_approval.bt_icon, COLOR_CYAN, 0);
-    
+
+
     // 2. Parse active_tool string thread-safely into up to 3 task rows
     char task_str[256];
     strncpy(task_str, data->active_tool, sizeof(task_str) - 1);
@@ -602,18 +612,37 @@ void ui_update_telemetry(const ble_telemetry_data_t *data)
     // Dynamic re-align to keep '%' symbol snapped to the right edge of the shifting numbers
     lv_obj_align_to(footer_progress_pct_lbl, footer_progress_lbl, LV_ALIGN_OUT_RIGHT_BOTTOM, 2, -5);
     
-    // 5. Update last updated time badge from local synchronized RTC
-    time_t now;
-    struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-    
-    if (timeinfo.tm_year >= 71) {
-        char time_badge[32];
-        snprintf(time_badge, sizeof(time_badge), "%02d/%02d %02d:%02d", 
-                 timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min);
-        lv_label_set_text(footer_time_lbl, time_badge);
+    // 5. Update quota reset time badge from host telemetry
+    if (data->quota_reset_time[0] != '\0') {
+        lv_label_set_text(footer_time_lbl, data->quota_reset_time);
     } else {
-        lv_label_set_text(footer_time_lbl, "No Sync");
+        lv_label_set_text(footer_time_lbl, "--");
+    }
+}
+
+void ui_update_device_battery(uint8_t percentage, bool is_charging)
+{
+    const char *batt_sym = LV_SYMBOL_BATTERY_FULL;
+    if (is_charging) {
+        batt_sym = LV_SYMBOL_CHARGE;
+    } else {
+        if      (percentage > 75) batt_sym = LV_SYMBOL_BATTERY_FULL;
+        else if (percentage > 50) batt_sym = LV_SYMBOL_BATTERY_3;
+        else if (percentage > 25) batt_sym = LV_SYMBOL_BATTERY_2;
+        else if (percentage > 10) batt_sym = LV_SYMBOL_BATTERY_1;
+        else                      batt_sym = LV_SYMBOL_BATTERY_EMPTY;
+    }
+
+    char batt_buf[16];
+    snprintf(batt_buf, sizeof(batt_buf), "%s %d%%", batt_sym, percentage);
+
+    if (header_guide.battery_lbl) {
+        lv_label_set_text(header_guide.battery_lbl, batt_buf);
+    }
+    if (header_dash.battery_lbl) {
+        lv_label_set_text(header_dash.battery_lbl, batt_buf);
+    }
+    if (header_approval.battery_lbl) {
+        lv_label_set_text(header_approval.battery_lbl, batt_buf);
     }
 }
