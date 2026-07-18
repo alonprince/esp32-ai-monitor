@@ -92,12 +92,13 @@ static void axp_read_battery_info(uint8_t *percentage, bool *is_charging)
         ESP_LOGE(TAG, "Failed to read battery percent: %s", esp_err_to_name(err));
     }
 
-    reg = 0x01; // Power status register
+    reg = 0x01; // PMU Status 2 register in AXP2101
     val = 0;
     err = i2c_master_transmit_receive(axp_dev_handle, &reg, 1, &val, 1, 100);
     if (err == ESP_OK) {
-        // Bit 3 (0x08) is battery charging status in AXP2101
-        *is_charging = (val & 0x08) != 0;
+        // Bits [2:0] indicate the charging status: values 0-3 mean charging (trickle, pre-charge, CC, CV)
+        uint8_t chg_status = val & 0x07;
+        *is_charging = (chg_status < 4);
     } else {
         *is_charging = false;
         ESP_LOGE(TAG, "Failed to read power status: %s", esp_err_to_name(err));
@@ -306,10 +307,8 @@ static void lvgl_task(void *arg)
 
         if (now - last_telemetry_check >= 200) {
             ble_telemetry_data_t data;
-            ble_server_get_telemetry(&data);
-            if (data.updated) {
+            if (ble_server_get_telemetry_and_clear(&data)) {
                 ui_update_telemetry(&data);
-                ble_server_clear_update_flag();
             }
             last_telemetry_check = now;
         }

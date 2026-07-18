@@ -26,7 +26,6 @@ static ble_telemetry_data_t s_telemetry = {
     .active_tool = "None",
     .message_preview = "None",
     .progress_current = 0,
-    .progress_total = 0,
     .sync_time = 0,
     .brightness = 100,
     .volume = 100,
@@ -115,11 +114,10 @@ static void ble_server_parse_tlv(const uint8_t *data, uint16_t len)
                 }
                 break;
             case 0x06: // Stats / Progress
-                if (tlv_len >= 2) {
+                if (tlv_len >= 1) {
                     s_telemetry.progress_current = val[0];
-                    s_telemetry.progress_total = val[1];
                     s_telemetry.updated = true;
-                    ESP_LOGI(TAG, "TLV Progress: %d/%d", s_telemetry.progress_current, s_telemetry.progress_total);
+                    ESP_LOGI(TAG, "TLV Progress: %d", s_telemetry.progress_current);
                 }
                 break;
             case 0x07: // Sync Time
@@ -390,20 +388,18 @@ void ble_server_send_interaction(uint8_t event_code)
     }
 }
 
-void ble_server_get_telemetry(ble_telemetry_data_t *out_data)
+bool ble_server_get_telemetry_and_clear(ble_telemetry_data_t *out_data)
 {
+    bool updated = false;
     if (xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY) == pdTRUE) {
-        memcpy(out_data, &s_telemetry, sizeof(ble_telemetry_data_t));
+        updated = s_telemetry.updated;
+        if (s_telemetry.updated) {
+            memcpy(out_data, &s_telemetry, sizeof(ble_telemetry_data_t));
+            s_telemetry.updated = false;
+        }
         xSemaphoreGive(s_telemetry_mutex);
     }
-}
-
-void ble_server_clear_update_flag(void)
-{
-    if (xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY) == pdTRUE) {
-        s_telemetry.updated = false;
-        xSemaphoreGive(s_telemetry_mutex);
-    }
+    return updated;
 }
 
 bool ble_server_is_connected(void)

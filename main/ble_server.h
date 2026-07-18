@@ -21,7 +21,6 @@ typedef struct {
     char active_tool[256];
     char message_preview[256];
     uint8_t progress_current;
-    uint8_t progress_total;
     uint32_t sync_time;
     uint8_t brightness;
     uint8_t volume;
@@ -36,11 +35,8 @@ void ble_server_init(void);
 // Event code: 1 = Approve, 2 = Deny
 void ble_server_send_interaction(uint8_t event_code);
 
-// Getter for telemetry data
-void ble_server_get_telemetry(ble_telemetry_data_t *out_data);
-
-// Reset update flag
-void ble_server_clear_update_flag(void);
+// Getter for telemetry data that also atomically clears the updated flag
+bool ble_server_get_telemetry_and_clear(ble_telemetry_data_t *out_data);
 
 // Check if BLE is connected
 bool ble_server_is_connected(void);
