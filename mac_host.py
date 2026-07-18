@@ -8,7 +8,24 @@ import glob
 import re
 import time
 import sqlite3
-from bleak import BleakScanner, BleakClient
+try:
+    from bleak import BleakScanner, BleakClient
+except ImportError:
+    # Fallback dummy mock for environments (like CI/CD runners) without bleak installed
+    class BleakScanner:
+        @classmethod
+        async def find_device_by_address(cls, *args, **kwargs):
+            return None
+        @classmethod
+        async def discover(cls, *args, **kwargs):
+            return []
+    class BleakClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
 
 # GATT Service & Characteristic UUIDs
 SERVICE_UUID = "0000cafe-0000-1000-8000-00805f9b34fb"
