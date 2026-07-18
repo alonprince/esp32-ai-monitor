@@ -21,7 +21,6 @@ typedef struct {
     char active_tool[128];
     char message_preview[128];
     uint8_t progress_current;
-    uint8_t progress_total;
     uint32_t sync_time;
     uint8_t brightness;
     uint8_t volume;
@@ -82,6 +81,12 @@ static void test_parse_tlv(const uint8_t *data, uint16_t len) {
                     int copy_len = tlv_len < sizeof(s_telemetry.agent_name) - 1 ? tlv_len : sizeof(s_telemetry.agent_name) - 1;
                     memcpy(s_telemetry.agent_name, val, copy_len);
                     s_telemetry.agent_name[copy_len] = '\0';
+                    s_telemetry.updated = true;
+                }
+                break;
+            case 0x06: // Stats / Progress (now 1 byte for Codex percentage only)
+                if (tlv_len >= 1) {
+                    s_telemetry.progress_current = val[0];
                     s_telemetry.updated = true;
                 }
                 break;
@@ -149,6 +154,14 @@ void run_tests() {
     assert(strcmp(s_telemetry.quota_reset_time, "22 Jul 14:00") == 0);
     assert(s_telemetry.updated == true);
     printf("C TEST: Parse TLV type 0x09 passed!\n");
+
+    // 1b. Test Parse TLV for single-byte progress (Type 0x06)
+    memset(&s_telemetry, 0, sizeof(s_telemetry));
+    uint8_t prog_packet[] = { 0x06, 0x01, 75 }; // type 0x06, len 1, value 75
+    test_parse_tlv(prog_packet, sizeof(prog_packet));
+    assert(s_telemetry.progress_current == 75);
+    assert(s_telemetry.updated == true);
+    printf("C TEST: Parse TLV type 0x06 (single-byte progress) passed!\n");
 
     // 2. Test ui_update_device_battery logic
     // Case 1: Charging

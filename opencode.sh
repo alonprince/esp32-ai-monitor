@@ -51,7 +51,7 @@ if [ "$MONITOR" = true ] && [ -S "$SOCKET" ]; then
     
     EXIT_CODE=$?
     send_event '{"cmd":"state","value":1}'
-    send_event '{"cmd":"stats","codex":100,"agy":0}'
+    send_event '{"cmd":"stats","codex":100}'
     
     echo "[opencode.sh] Done (exit code: $EXIT_CODE)"
 else

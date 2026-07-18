@@ -101,7 +101,7 @@ def parse_opencode_event(line: str) -> list:
     
     elif event_type == "result":
         commands.append({"cmd": "state", "value": 1})
-        commands.append({"cmd": "stats", "codex": 100, "agy": 0})
+        commands.append({"cmd": "stats", "codex": 100})
     
     elif event_type == "system":
         subtype = data.get("subtype", "")
@@ -123,7 +123,7 @@ async def pipe_monitor(socket_path: str = DEFAULT_SOCKET):
     print(f"[Bridge] Press Ctrl+C to stop")
     
     state = "idle"
-    last_stats = {"codex": 0, "agy": 0}
+    last_stats = {"codex": 0}
     
     async def reader():
         loop = asyncio.get_event_loop()
@@ -144,7 +144,7 @@ async def pipe_monitor(socket_path: str = DEFAULT_SOCKET):
                         state = new_state
                 
                 if cmd["cmd"] == "stats":
-                    last_stats = {"codex": cmd.get("codex", 0), "agy": cmd.get("agy", 0)}
+                    last_stats = {"codex": cmd.get("codex", 0)}
                 
                 send_to_socket(cmd, socket_path)
                 await asyncio.sleep(0.05)
