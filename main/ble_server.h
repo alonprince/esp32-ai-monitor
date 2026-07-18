@@ -25,6 +25,7 @@ typedef struct {
     uint32_t sync_time;
     uint8_t brightness;
     uint8_t volume;
+    char quota_reset_time[32]; // Quota reset time string e.g. "23 Jul 13:27"
     bool updated; // Flag indicating UI needs redraw
 } ble_telemetry_data_t;
 

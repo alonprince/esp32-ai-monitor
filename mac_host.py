@@ -29,6 +29,7 @@ TYPE_PREVIEW = 0x05
 TYPE_STATS = 0x06
 TYPE_SYNC_TIME = 0x07
 TYPE_SOUND_LIGHT = 0x08
+TYPE_QUOTA_RESET = 0x09  # Quota reset time string (e.g. "23 Jul 13:27")
 
 # States
 STATE_DISCONNECTED = 0
@@ -96,6 +97,10 @@ class BLECommandProcessor:
             agy = min(max(kwargs.get("agy", 0), 0), 100)
             payload = encode_tlv(TYPE_STATS, bytes([codex, agy]))
             print(f"  -> STATS: Codex={codex}% Agy={agy}%")
+        elif cmd == "quota_reset":
+            reset_str = str(kwargs.get("value", "--/-- --:--"))[:20]
+            payload = encode_tlv(TYPE_QUOTA_RESET, reset_str.encode('utf-8'))
+            print(f"  -> QUOTA_RESET: {reset_str}")
         elif cmd == "sound":
             bright = min(max(kwargs.get("bright", 50), 0), 100)
             vol = min(max(kwargs.get("vol", 50), 0), 100)
@@ -116,21 +121,7 @@ class BLECommandProcessor:
 
 
 def clean_chinese_to_pinyin(text: str) -> str:
-    if not text:
-        return ""
-    # Check if there is any Chinese character
-    if not any('\u4e00' <= char <= '\u9fff' for char in text):
-        return text
-        
-    try:
-        from pypinyin import pinyin, Style
-        pinyin_list = pinyin(text, style=Style.NORMAL)
-        result = " ".join(p[0] for p in pinyin_list)
-        return result.title()
-    except ImportError:
-        # Fallback: remove non-ascii characters to avoid crash
-        ascii_chars = [char for char in text if ord(char) < 128]
-        return "".join(ascii_chars)
+    return text
 
 def format_telemetry_task(name: str, task_id: str, time_str: str = "00:00", status: str = "working") -> str:
     # Convert Chinese characters to Pinyin to prevent rendering mojibake on Montserrat font
@@ -148,56 +139,79 @@ def format_telemetry_task(name: str, task_id: str, time_str: str = "00:00", stat
         
     return f"{clean_name},{clean_id},{time_str},{status}"
 
-def parse_token_value(val_str: str) -> int:
-    val_str = val_str.strip().upper()
-    try:
-        if val_str.endswith("M"):
-            return int(float(val_str[:-1]) * 1_000_000)
-        elif val_str.endswith("K"):
-            return int(float(val_str[:-1]) * 1_000)
-        else:
-            return int(float(val_str))
-    except Exception:
-        return 0
+CODEX_SESSIONS_DIR = os.path.expanduser("~/.codex/sessions")
 
-async def get_codex_usage_percentage(limit: int) -> int:
+
+def get_codex_rate_limit_remaining() -> tuple:
+    """
+    Read recent Codex session jsonl files to extract the actual weekly quota
+    remaining percentage from rate_limits.primary.used_percent and resets_at.
+    
+    This data comes directly from OpenAI's backend (chatgpt.com/backend-api) and
+    is embedded in each token_count event in the session transcript. It corresponds
+    exactly to what Codex's /status command displays as 'Weekly limit: X% left'.
+    
+    Returns: (remaining_pct: int, reset_str: str)  e.g. (24, "23 Jul 13:27")
+    """
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "opencode", "stats", "--days", "7",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode('utf-8', errors='ignore')
+        import glob
+        pattern = os.path.join(CODEX_SESSIONS_DIR, "**", "*.jsonl")
+        files = glob.glob(pattern, recursive=True)
+        if not files:
+            return 100, "--"
         
-        # 1. Parse Total Cost
-        cost_match = re.search(r"Total Cost\s+\$([0-9.]+)", output)
-        total_cost = 0.0
-        if cost_match:
-            total_cost = float(cost_match.group(1))
-            
-        # 2. Parse Input & Output tokens
-        input_match = re.search(r"Input\s+([0-9.MK]+)", output)
-        output_match = re.search(r"Output\s+([0-9.MK]+)", output)
+        # Check the 10 most recently modified files to find the latest rate_limits data
+        recent_files = sorted(files, key=os.path.getmtime, reverse=True)[:10]
         
-        input_tokens = parse_token_value(input_match.group(1)) if input_match else 0
-        output_tokens = parse_token_value(output_match.group(1)) if output_match else 0
+        best_used_percent = None
+        best_resets_at = None
+        best_ts = None
         
-        # If limit is small (e.g. <= 1000), treat as dollar budget (e.g. 10 = $10.00)
-        if limit <= 1000:
-            used_percentage = min(int((total_cost / limit) * 100), 100)
-            remaining_percentage = max(0, 100 - used_percentage)
-            print(f"[Stats] Codex Quota: ${total_cost:.2f} / ${limit:.2f} (Remaining: {remaining_percentage}%)")
-        else:
-            total_tokens = input_tokens + output_tokens
-            used_percentage = min(int((total_tokens / limit) * 100), 100)
-            remaining_percentage = max(0, 100 - used_percentage)
-            print(f"[Stats] Codex Quota: {total_tokens:,} / {limit:,} tokens (Remaining: {remaining_percentage}%)")
-            
-        return remaining_percentage
+        for filepath in recent_files:
+            try:
+                with open(filepath) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            payload = entry.get("payload", {})
+                            if payload.get("type") == "token_count":
+                                rate_limits = payload.get("rate_limits", {})
+                                if rate_limits:
+                                    primary = rate_limits.get("primary")
+                                    if primary and "used_percent" in primary:
+                                        ts = entry.get("timestamp", "")
+                                        if best_ts is None or ts > best_ts:
+                                            best_used_percent = float(primary["used_percent"])
+                                            best_resets_at = primary.get("resets_at")
+                                            best_ts = ts
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+        
+        if best_used_percent is not None:
+            remaining = max(0, 100 - int(best_used_percent))
+            # Format resets_at unix timestamp as "DD Mon HH:MM"
+            reset_str = "--"
+            if best_resets_at:
+                try:
+                    import datetime
+                    MONTHS = ["Jan","Feb","Mar","Apr","May","Jun",
+                              "Jul","Aug","Sep","Oct","Nov","Dec"]
+                    dt = datetime.datetime.fromtimestamp(int(best_resets_at))
+                    reset_str = f"{dt.day} {MONTHS[dt.month-1]} {dt.hour:02d}:{dt.minute:02d}"
+                except Exception:
+                    pass
+            print(f"[Stats] Codex Weekly Quota: {int(best_used_percent)}% used → {remaining}% left, resets {reset_str}")
+            return remaining, reset_str
+        
     except Exception as e:
-        print(f"[Stats] Error fetching Codex stats: {e}")
-    return 100
+        print(f"[Stats] Error reading Codex session for rate limits: {e}")
+    
+    return 100, "--"
 
 async def handle_json_command(processor: BLECommandProcessor, json_str: str):
     """Parse a JSON command string and process it."""
@@ -258,11 +272,11 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             await processor.process_command("tool", value=tool_val)
             await processor.process_command("preview", value=clean_chinese_to_pinyin(preview_val))
             
-            # Send stats (use overall account usage percentage)
-            limit = getattr(processor, "codex_limit", 10)
-            percentage = await get_codex_usage_percentage(limit)
+            # Send stats (read actual weekly quota from Codex session files)
+            percentage, reset_str = get_codex_rate_limit_remaining()
             await processor.process_command("stats", codex=percentage, agy=0)
-            print(f"[HookEvent] Event={event} Tool={tool} Quota={percentage}% TaskName={task_name} TaskID={task_id[:8]}")
+            await processor.process_command("quota_reset", value=reset_str)
+            print(f"[HookEvent] Event={event} Tool={tool} Quota={percentage}% Resets={reset_str} TaskName={task_name} TaskID={task_id[:8]}")
         else:
             await processor.process_command(cmd, **{k: v for k, v in msg.items() if k != "cmd"})
     except json.JSONDecodeError as e:
@@ -417,15 +431,16 @@ def get_latest_codex_session_info():
         print(f"[CodexDB] Error querying latest session: {e}")
     return None
 
-async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
+async def auto_codex_db_loop(processor: BLECommandProcessor):
     print("[AutoWatcher] Started background loop monitoring Codex SQLite database...")
     last_tokens_used = -1
     last_session_id = None
     
     # Run once on startup to sync the initial quota
     try:
-        percentage = await get_codex_usage_percentage(limit)
+        percentage, reset_str = get_codex_rate_limit_remaining()
         await processor.process_command("stats", codex=percentage, agy=0)
+        await processor.process_command("quota_reset", value=reset_str)
     except Exception:
         pass
     
@@ -441,26 +456,27 @@ async def auto_codex_db_loop(processor: BLECommandProcessor, limit: int):
                     last_tokens_used = tokens_used
                     last_session_id = session_id
                     
-                    # Fetch overall usage/quota percentage (corresponds to /status command)
-                    percentage = await get_codex_usage_percentage(limit)
+                    # Fetch actual weekly quota remaining (corresponds to /status 'Weekly limit: X% left')
+                    percentage, reset_str = get_codex_rate_limit_remaining()
                     await processor.process_command("stats", codex=percentage, agy=0)
+                    await processor.process_command("quota_reset", value=reset_str)
                     
                     # Also update the task details (Task Name, Task ID) if not idle
                     clean_id = session_id.replace("opencode-", "")
                     task_val = format_telemetry_task(preview, clean_id, status="working")
                     await processor.process_command("tool", value=task_val)
                     
-                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Quota={percentage}% Preview={preview[:40]}...")
+                    print(f"[AutoWatcher] Codex DB Sync: Session={session_id} Quota={percentage}% Resets={reset_str} Preview={preview[:40]}...")
         except Exception as e:
             print(f"[AutoWatcher] Codex DB error: {e}")
-            
+
         await asyncio.sleep(5.0)
 
 async def main():
     parser = argparse.ArgumentParser(description="BLE host for ESP32 AI Monitor")
     parser.add_argument("--address", help="Device MAC or UUID address (optional)")
     parser.add_argument("--socket", default=DEFAULT_SOCKET, help=f"Unix socket path for JSON commands (default: {DEFAULT_SOCKET})")
-    parser.add_argument("--codex-limit", type=int, default=10, help="Codex limit/budget: <=1000 for dollar budget (e.g. 10 for $10.00), >1000 for weekly token limit (default: 10)")
+    # --codex-limit removed: quota now read directly from Codex session files (rate_limits.primary.used_percent)
     args = parser.parse_args()
 
     device = None
@@ -502,9 +518,7 @@ async def main():
         await client.start_notify(NOTIFY_CHAR_UUID, notification_handler)
         
         processor = BLECommandProcessor(client)
-        # Store configuration on processor for access in json command handler
-        processor.codex_limit = args.codex_limit
-        
+
         # Automatically sync time upon connection
         print("Synchronizing device time...")
         try:
@@ -513,7 +527,7 @@ async def main():
             print(f"Failed to auto-sync time: {e}")
         
         # Start background automatic watcher for Codex database
-        db_task = asyncio.create_task(auto_codex_db_loop(processor, args.codex_limit))
+        db_task = asyncio.create_task(auto_codex_db_loop(processor))
 
         if args.socket:
             socket_task = asyncio.create_task(

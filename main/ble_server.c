@@ -30,6 +30,7 @@ static ble_telemetry_data_t s_telemetry = {
     .sync_time = 0,
     .brightness = 100,
     .volume = 100,
+    .quota_reset_time = "--",
     .updated = false
 };
 
@@ -145,6 +146,17 @@ static void ble_server_parse_tlv(const uint8_t *data, uint16_t len)
                     s_telemetry.volume = val[1];
                     s_telemetry.updated = true;
                     ESP_LOGI(TAG, "TLV Brightness: %d, Volume: %d", s_telemetry.brightness, s_telemetry.volume);
+                }
+                break;
+            case 0x09: // Quota Reset Time
+                {
+                    int copy_len = tlv_len < (int)sizeof(s_telemetry.quota_reset_time) - 1
+                                 ? tlv_len
+                                 : (int)sizeof(s_telemetry.quota_reset_time) - 1;
+                    memcpy(s_telemetry.quota_reset_time, val, copy_len);
+                    s_telemetry.quota_reset_time[copy_len] = '\0';
+                    s_telemetry.updated = true;
+                    ESP_LOGI(TAG, "TLV QuotaReset: %s", s_telemetry.quota_reset_time);
                 }
                 break;
             default:
