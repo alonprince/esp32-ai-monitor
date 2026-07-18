@@ -167,13 +167,22 @@ class TestHandleJsonCommand(unittest.IsolatedAsyncioTestCase):
         processor = MockBLECommandProcessor()
         cmd_data = {
             "cmd": "stats",
-            "codex": 55,
-            "agy": 12
+            "codex": 55
         }
         await mac_host.handle_json_command(processor, json.dumps(cmd_data))
         
         self.assertEqual(len(processor.calls), 1)
-        self.assertEqual(processor.calls[0], ("stats", {"codex": 55, "agy": 12}))
+        self.assertEqual(processor.calls[0], ("stats", {"codex": 55}))
+
+    def test_safe_truncate_utf8(self):
+        # Create a value that would be truncated in the middle of a 3-byte Chinese character
+        value_chars = "a" * 254 + "哈"
+        encoded = value_chars.encode('utf-8')
+        truncated = mac_host.encode_tlv(0x02, encoded)
+
+        parsed_val = truncated[2:] # skip type and length
+        self.assertEqual(len(parsed_val), 254) # "哈" should be dropped completely since it was cut in half
+        self.assertEqual(parsed_val.decode('utf-8'), "a" * 254)
 
 if __name__ == '__main__':
     # Import mac_host and related modules needed for tests

@@ -40,12 +40,14 @@ STATE_WAIT_QUESTION = 4
 
 def encode_tlv(type_code: int, value: bytes) -> bytes:
     """Pack Type, Length, and Value into a TLV binary frame."""
-    length = len(value)
-    if length > 255:
-        print(f"[Warning] Value for type 0x{type_code:02X} is too long ({length} bytes), truncating to 255.")
-        value = value[:255]
-        length = 255
-    return bytes([type_code, length]) + value
+    if len(value) > 255:
+        print(f"[Warning] Value for type 0x{type_code:02X} is too long ({len(value)} bytes), truncating to 255.")
+        try:
+            # Safely decode and re-encode to drop any truncated partial UTF-8 character bytes
+            value = value[:255].decode('utf-8', errors='ignore').encode('utf-8')
+        except Exception:
+            value = value[:255]
+    return bytes([type_code, len(value)]) + value
 
 def notification_handler(sender, data):
     """Callback for BLE notifications received from ESP32."""
@@ -66,6 +68,7 @@ class BLECommandProcessor:
     
     def __init__(self, client: BleakClient):
         self.client = client
+        self.lock = asyncio.Lock()
     
     async def process_command(self, cmd: str, **kwargs):
         """Process a named command with keyword arguments. Returns True if a frame was sent."""
@@ -94,9 +97,8 @@ class BLECommandProcessor:
             print(f"  -> PREVIEW: {preview_val[:60]}...")
         elif cmd == "stats":
             codex = min(max(kwargs.get("codex", 0), 0), 100)
-            agy = min(max(kwargs.get("agy", 0), 0), 100)
-            payload = encode_tlv(TYPE_STATS, bytes([codex, agy]))
-            print(f"  -> STATS: Codex={codex}% Agy={agy}%")
+            payload = encode_tlv(TYPE_STATS, bytes([codex]))
+            print(f"  -> STATS: Codex={codex}%")
         elif cmd == "quota_reset":
             reset_str = str(kwargs.get("value", "--/-- --:--"))[:20]
             payload = encode_tlv(TYPE_QUOTA_RESET, reset_str.encode('utf-8'))
@@ -115,7 +117,8 @@ class BLECommandProcessor:
         
         if payload:
             # Set response=True to support write request for packets exceeding default MTU size
-            await self.client.write_gatt_char(WRITE_CHAR_UUID, payload, response=True)
+            async with self.lock:
+                await self.client.write_gatt_char(WRITE_CHAR_UUID, payload, response=True)
             return True
         return False
 
@@ -201,7 +204,7 @@ def get_codex_rate_limit_remaining() -> tuple:
                     import datetime
                     MONTHS = ["Jan","Feb","Mar","Apr","May","Jun",
                               "Jul","Aug","Sep","Oct","Nov","Dec"]
-                    dt = datetime.datetime.fromtimestamp(int(best_resets_at))
+                    dt = datetime.datetime.fromtimestamp(int(float(best_resets_at)))
                     reset_str = f"{dt.day} {MONTHS[dt.month-1]} {dt.hour:02d}:{dt.minute:02d}"
                 except Exception:
                     pass
@@ -274,7 +277,7 @@ async def handle_json_command(processor: BLECommandProcessor, json_str: str):
             
             # Send stats (read actual weekly quota from Codex session files)
             percentage, reset_str = get_codex_rate_limit_remaining()
-            await processor.process_command("stats", codex=percentage, agy=0)
+            await processor.process_command("stats", codex=percentage)
             await processor.process_command("quota_reset", value=reset_str)
             print(f"[HookEvent] Event={event} Tool={tool} Quota={percentage}% Resets={reset_str} TaskName={task_name} TaskID={task_id[:8]}")
         else:
@@ -322,7 +325,7 @@ async def interactive_shell(processor: BLECommandProcessor):
     print("  workspace <name>         - Change workspace folder name")
     print("  tool <command>           - Change active tool command (supports multiple separated by '|')")
     print("  preview <text>           - Change message preview snippet")
-    print("  stats <codex> <agy>      - Change Codex (0-100) and Antigravity (0-100) usage arcs")
+    print("  stats <codex>            - Change Codex weekly quota usage (0-100)")
     print("  sound <bright> <vol>     - Change brightness and volume (0-100)")
     print("  sync_time                - Synchronize current host local time to ESP32 RTC")
     print("  exit                     - Disconnect and exit")
@@ -383,11 +386,10 @@ async def interactive_shell(processor: BLECommandProcessor):
                     continue
             elif cmd == "stats":
                 subparts = arg.split()
-                if len(subparts) == 2:
+                if len(subparts) == 1:
                     kwargs["codex"] = int(subparts[0])
-                    kwargs["agy"] = int(subparts[1])
                 else:
-                    print("Usage: stats <codex (0-100)> <agy (0-100)>")
+                    print("Usage: stats <codex (0-100)>")
                     continue
             elif cmd == "sound":
                 subparts = arg.split()
@@ -439,7 +441,7 @@ async def auto_codex_db_loop(processor: BLECommandProcessor):
     # Run once on startup to sync the initial quota
     try:
         percentage, reset_str = get_codex_rate_limit_remaining()
-        await processor.process_command("stats", codex=percentage, agy=0)
+        await processor.process_command("stats", codex=percentage)
         await processor.process_command("quota_reset", value=reset_str)
     except Exception:
         pass
@@ -458,7 +460,7 @@ async def auto_codex_db_loop(processor: BLECommandProcessor):
                     
                     # Fetch actual weekly quota remaining (corresponds to /status 'Weekly limit: X% left')
                     percentage, reset_str = get_codex_rate_limit_remaining()
-                    await processor.process_command("stats", codex=percentage, agy=0)
+                    await processor.process_command("stats", codex=percentage)
                     await processor.process_command("quota_reset", value=reset_str)
                     
                     # Also update the task details (Task Name, Task ID) if not idle
