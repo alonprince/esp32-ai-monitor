@@ -170,3 +170,40 @@ Added clean_chinese_to_pinyin helper in mac_host.py which converts Chinese chara
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Implement battery level, native Chinese, and remove agy support
+
+**Date**: 2026-07-18
+**Task**: Implement battery level, native Chinese, and remove agy support
+**Branch**: `feature/ui-fixes`
+
+### Summary
+
+Added Waveshare battery monitoring via AXP2101 PMU, native Chinese font configuration and partition enlargement, refined quota resets telemetry and atomically resolved telemetry race conditions and BLE writing thread safety, fully removed deprecated Antigravity agy support from codebase.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f337e49` | (see git log) |
+| `908efbb` | (see git log) |
+| `682d5ff` | (see git log) |
+| `4953217` | (see git log) |
+| `6ea7487` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
