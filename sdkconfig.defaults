@@ -23,6 +23,12 @@ CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_36=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_16_CJK=y
+
+# Custom larger partition table to accommodate large CJK font tables
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp_large.csv"
+
 
 # Disable unused color backends (only need RGB565 variants)
 CONFIG_LV_DRAW_SW_SUPPORT_RGB565A8=n
